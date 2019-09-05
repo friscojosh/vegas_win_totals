@@ -25,7 +25,10 @@ new <- html_nodes(content(betonline), xpath = '//*[@id="moneyline-contest-conten
    str_replace_all("2019 Regular Season ", " ") %>%
    str_replace_all("More InfoCloseXMore Info", ",") %>%
    str_replace_all("\\)", "),") %>%
-   str_replace_all("½", '.5')
+   str_replace_all("½", '.5') %>%
+   str_replace_all("More Info CloseXMore Info", ",") %>%
+   str_replace_all("More InfoClose XMore Info", ",") %>%
+   str_replace_all("More InfoCloseX More Info", ",")
 ## read in the CSV we created with the parser
 betonline_odds <- read_csv(new, col_names = FALSE) %>%
    select(-'X4')
@@ -37,9 +40,9 @@ betonline_odds <- betonline_odds %>%
    mutate(total = str_extract(odds1, "(?<= )\\d+\\.*\\d*"),
           ### extract the moneline odds
           under_odds = as.numeric(ifelse(str_detect(odds1, "Under"), str_extract(odds1, "(?<=\\().+?(?=\\))"),
-                                  ifelse(str_detect(odds2, "Under"), str_extract(odds2, "(?<=\\().+?(?=\\))"), 0))),
+                                         ifelse(str_detect(odds2, "Under"), str_extract(odds2, "(?<=\\().+?(?=\\))"), 0))),
           over_odds = as.numeric(ifelse(str_detect(odds1, "Over"), str_extract(odds1, "(?<=\\().+?(?=\\))"),
-                                 ifelse(str_detect(odds2, "Over"), str_extract(odds2, "(?<=\\().+?(?=\\))"), 0)))) %>%
+                                        ifelse(str_detect(odds2, "Over"), str_extract(odds2, "(?<=\\().+?(?=\\))"), 0)))) %>%
    ### clean up the columns
    select(-odds1, -odds2)
 
@@ -54,7 +57,8 @@ win_totals_19 <- betonline_odds %>%
    na.omit() %>%
    group_by(team) %>%
    ### take the average but round to half wins
-   summarise(total = as.integer(mean(total) * 2) / 2 )
+   summarise(total = mean(total)) %>%
+   mutate(total = plyr::round_any(total, 0.5))
 
 ### data from sportshistoryodds.com. Easiest way to view the data is on PFR here:
 ### https://www.pro-football-reference.com/years/2018/preseason_odds.htm
@@ -64,18 +68,13 @@ soh_totals <- read_csv("data/sportsoddshistory.csv") %>%
           over_under = ifelse(actual_wins > total, "over",
                               ifelse(actual_wins < total, "under", "push")))
 
-soh_totals %>%
-   group_by(total) %>%
-   summarise(actual_wins = mean(actual_wins),
-             count = n())
-
 ### check Vegas calibration
 soh_totals %>%
    group_by(total) %>%
    summarise(actual_wins = mean(actual_wins),
              count = n()) %>%
    ggplot(aes(x = total, y = actual_wins, size = count)) +
-      geom_point() + theme_538 +
+   geom_point() + theme_538 +
    geom_smooth(method = "lm", formula = y ~ x + 0, linetype = 5, color = "black", alpha = .5, se = FALSE) +
    scale_x_continuous(limits = c(0,16), breaks = 1:16) +
    scale_y_continuous(limits = c(0,16), breaks = 1:16) +
@@ -97,10 +96,27 @@ soh_totals %>%
 vegas_adjusted_wins <- soh_totals %>%
    group_by(total) %>%
    summarise(actual_wins = mean(actual_wins),
-             count = n()) %>%
-   group_by(total) %>%
-   ### take the average but round to half wins
-   summarise(actual_wins = as.integer(mean(actual_wins) * 2) / 2 )
+             count = n())
+
+### HERE IS THE NEW CODE. THE RAIDERS ARE LISTED TWICE BECAUSE REASONS BUT NOTHING CHANGES.
+win_totals_19_2 <- win_totals_19 %>%
+   left_join(vegas_adjusted_wins, by = c("total"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ### let's plot all the points without aggregating to see how that looks...
 soh_totals %>%
@@ -126,7 +142,7 @@ soh_totals %>%
           over_under != "push") %>%
    ggplot(aes(x = actual_wins, y = as.factor(total), color = over_under, fill = over_under)) +
    stat_binline(stat = "binline", binwidth = 1,
-                        draw_baseline = FALSE, alpha = .5, color = '#A9A9A9', panel_scaling = TRUE, pad = TRUE,
+                draw_baseline = FALSE, alpha = .5, color = '#A9A9A9', panel_scaling = TRUE, pad = TRUE,
                 vline_size = 10, vline_color = "black", vline_alpha = 1) +
    theme_538 +
    scale_fill_manual(values = c("#F83572", "#36B5BD"), labels = c("over", "under/push")) +
@@ -183,7 +199,7 @@ qchisq(0.950, 1)
 vigs <- read_csv("data/ELDO_VegasWinTotals_2002-2018.csv") %>%
    na.omit() %>%
    mutate(implied_probability = round(ifelse(over_odds < 0, (-1 * (over_odds)) / (-1 * (over_odds) + 100),
-                                       100 / (over_odds + 100)),2 ),
+                                             100 / (over_odds + 100)),2 ),
           over_binary = ifelse(over_under == "Over", 1,
                                ifelse(over_under == "Under", 0, -1)))
 
@@ -213,8 +229,8 @@ all_joined_favored %>%
              over_pct = mean(over_binary),
              count = n()) %>%
    mutate(moneyline = ifelse(implied_probability > 0.5, ((-1 * implied_probability * 100) / (100 - implied_probability * 100)) * 100,
-                                  ifelse(implied_probability < 0.5, ((100 - (implied_probability * 100)) / (implied_probability * 100)) * 100,
-                                         100)))
+                             ifelse(implied_probability < 0.5, ((100 - (implied_probability * 100)) / (implied_probability * 100)) * 100,
+                                    100)))
 
 ### filter to just half win totals between 5.5 and 8.5
 all_joined_favored %>%
@@ -228,8 +244,8 @@ all_joined_favored %>%
              over_pct = mean(over_binary),
              count = n()) %>%
    mutate(moneyline = ifelse(implied_probability > 0.5, ((-1 * implied_probability * 100) / (100 - implied_probability * 100)) * 100,
-                                  ifelse(implied_probability < 0.5, ((100 - (implied_probability * 100)) / (implied_probability * 100)) * 100,
-                                         100)))
+                             ifelse(implied_probability < 0.5, ((100 - (implied_probability * 100)) / (implied_probability * 100)) * 100,
+                                    100)))
 
 ### if we blindedly bet on the over for all bets, would this be +EV?
 all_joined_favored %>%
